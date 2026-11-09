@@ -14,17 +14,20 @@ html{scroll-padding-top:env(safe-area-inset-top,0px);height:100%}
 *{box-sizing:border-box}
 body{margin:0;height:100%;background:var(--bg);color:var(--text);font:500 17px/1.4 Figtree,system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
 main{height:100%;max-width:560px;margin:0 auto;padding:16px 18px 18px;display:flex;flex-direction:column;gap:14px}
-header{display:flex;align-items:center;justify-content:space-between}
-h1{margin:0;font:400 26px/1 Anton,Impact,sans-serif;letter-spacing:.02em}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+h1{margin:0;font:400 22px/1 Anton,Impact,sans-serif;letter-spacing:.02em}
 .tg{display:flex;gap:8px}
-.tg button{font:inherit;font-size:14px;font-weight:700;color:var(--text);background:var(--surf);border:0;border-radius:999px;padding:8px 14px;cursor:pointer}
+.tg button{font:inherit;font-size:13px;font-weight:700;color:var(--text);background:var(--surf);border:0;border-radius:999px;padding:8px 11px;cursor:pointer}
 .tg button[aria-pressed="false"]{opacity:.45;text-decoration:line-through}
 #vsel{font:inherit;font-size:14px;color:var(--text);background:var(--surf);border:0;border-radius:12px;padding:8px 10px;width:100%}
 .stage{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:14px;min-height:0}
 #label{margin:0;max-width:30ch;color:var(--muted);font-size:18px}
 #label.win{color:var(--win);font-weight:700}
 #label.lose{color:var(--stop);font-weight:700}
-#num{font:400 clamp(84px,28vw,168px)/1 Anton,Impact,'Arial Narrow',sans-serif;color:var(--num);letter-spacing:.01em}
+.orb{--w:min(72vw,34vh,300px);--ring:var(--num);--dur:.7s;width:var(--w);height:var(--w);flex:none;border-radius:50%;display:grid;place-items:center;background:var(--surf);border:4px solid var(--ring);transition:border-color .6s}
+.orb.beat{animation:thump var(--dur) ease-out}
+@keyframes thump{0%{transform:scale(1);box-shadow:0 0 0 0 var(--ring)}20%{transform:scale(1.045)}100%{transform:scale(1);box-shadow:0 0 0 36px transparent}}
+#num{font:400 calc(var(--w)*.3)/1 Anton,Impact,'Arial Narrow',sans-serif;color:var(--num);letter-spacing:.01em}
 #num.pop{animation:pop .22s ease-out}
 @keyframes pop{from{transform:scale(1.12)}to{transform:scale(1)}}
 #log{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px;justify-content:center;max-height:30vh;overflow:auto}
@@ -42,7 +45,7 @@ h1{margin:0;font:400 26px/1 Anton,Impact,sans-serif;letter-spacing:.02em}
 footer{display:flex;justify-content:space-around;color:var(--muted);font-size:14px}
 footer b{display:block;color:var(--text);font-size:20px}
 footer div{text-align:center}
-@media (prefers-reduced-motion:reduce){#num.pop{animation:none}}
+@media (prefers-reduced-motion:reduce){#num.pop,.orb.beat{animation:none}}
 </style>
 </head>
 <body>
@@ -52,12 +55,13 @@ footer div{text-align:center}
     <div class="tg">
       <button id="tm" aria-pressed="true">Music</button>
       <button id="tv" aria-pressed="true">Voice</button>
+      <button id="tl" aria-pressed="false">Shout</button>
     </div>
   </header>
   <select id="vsel" aria-label="Voice"></select>
   <section class="stage" aria-live="polite">
     <p id="label">Stop before the bong and bank the last number you hear.</p>
-    <div id="num">£—</div>
+    <div class="orb" id="orb"><div id="num">£—</div></div>
     <ol id="log"></ol>
     <div class="after" id="after" hidden>
       <button id="wi">What if?</button>
@@ -175,13 +179,13 @@ function startMusic(){
   const rg=ac.createGain();rg.gain.value=.03;riser.connect(rg);rg.connect(master);riser.start();nodes.push(riser);
   const lfo=ac.createOscillator(),lg=ac.createGain();
   lfo.frequency.value=.25;lg.gain.value=80;lfo.connect(lg);lg.connect(lp.frequency);lfo.start();nodes.push(lfo);
-  playing=true;bpm=84;beat();
+  playing=true;bpm=84;heat(0);beat();
 }
 function beat(){
   if(!playing)return;
   const t=ac.currentTime;
   const o=ac.createOscillator(),g=ac.createGain();
-  o.frequency.setValueAtTime(110,t);o.frequency.exponentialRampToValueAtTime(40,t+.15);
+  pulse();o.frequency.setValueAtTime(110,t);o.frequency.exponentialRampToValueAtTime(40,t+.15);
   g.gain.setValueAtTime(.45,t);g.gain.exponentialRampToValueAtTime(.001,t+.2);
   o.connect(g);g.connect(master);o.start(t);o.stop(t+.22);
   const t2=t+30/bpm,o2=ac.createOscillator(),g2=ac.createGain();
@@ -192,14 +196,62 @@ function beat(){
 }
 function lift(i){
   if(!playing)return;
-  bpm=Math.min(150,84+i*6);
+  bpm=Math.min(150,84+i*6);heat(i/9);
   riser.frequency.setTargetAtTime(220*Math.pow(1.07,i),ac.currentTime,.3);
 }
 function stopMusic(){
-  playing=false;clearTimeout(beatT);
+  playing=false;clearTimeout(beatT);clearTimeout(sfxT);
   if(master){master.gain.cancelScheduledValues(0);master.gain.setTargetAtTime(0,ac.currentTime,.03)}
   const ns=nodes;nodes=[];
   setTimeout(()=>ns.forEach(o=>{try{o.stop()}catch(e){}}),300);
+}
+let sfxT,noiseBuf;
+function pulse(){
+  if(matchMedia('(prefers-reduced-motion:reduce)').matches)return;
+  orb.style.setProperty('--dur',(60/bpm*.9)+'s');
+  orb.classList.remove('beat');void orb.offsetWidth;orb.classList.add('beat');
+}
+function heat(h){orb.style.setProperty('--ring','hsl('+(50-50*Math.min(1,h))+' 90% 50%)')}
+function noise(){
+  if(!noiseBuf){
+    noiseBuf=ac.createBuffer(1,ac.sampleRate*2,ac.sampleRate);
+    const d=noiseBuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;
+  }
+  const s=ac.createBufferSource();s.buffer=noiseBuf;return s;
+}
+function sfx(){
+  const t=ac.currentTime,k=Math.floor(Math.random()*3);
+  if(k===0){ // rising whoosh
+    const s=noise(),f=ac.createBiquadFilter(),g=ac.createGain();
+    f.type='bandpass';f.Q.value=2;
+    f.frequency.setValueAtTime(300,t);f.frequency.exponentialRampToValueAtTime(3000,t+1.6);
+    g.gain.setValueAtTime(.001,t);g.gain.exponentialRampToValueAtTime(.8,t+1.2);g.gain.exponentialRampToValueAtTime(.001,t+1.7);
+    s.connect(f);f.connect(g);g.connect(master);s.start(t);s.stop(t+1.8);
+  }else if(k===1){ // thunder rumble
+    const s=noise(),f=ac.createBiquadFilter(),g=ac.createGain(),o=ac.createOscillator(),og=ac.createGain();
+    s.loop=true;f.type='lowpass';f.Q.value=.7;
+    f.frequency.setValueAtTime(400,t);f.frequency.exponentialRampToValueAtTime(120,t+3);
+    g.gain.setValueAtTime(.001,t);g.gain.linearRampToValueAtTime(4,t+.35);
+    for(let j=1;j<=6;j++)g.gain.linearRampToValueAtTime(1.5+Math.random()*3,t+.35+j*.4);
+    g.gain.exponentialRampToValueAtTime(.001,t+3.4);
+    s.connect(f);f.connect(g);g.connect(master);s.start(t);s.stop(t+3.5);
+    o.frequency.setValueAtTime(100,t);o.frequency.exponentialRampToValueAtTime(55,t+3);
+    og.gain.setValueAtTime(.001,t);og.gain.linearRampToValueAtTime(.4,t+.5);og.gain.exponentialRampToValueAtTime(.001,t+3.2);
+    o.connect(og);og.connect(master);o.start(t);o.stop(t+3.3);
+  }else{ // snake hiss
+    const s=noise(),f=ac.createBiquadFilter(),g=ac.createGain();
+    s.loop=true;f.type='bandpass';f.frequency.value=5500;f.Q.value=.9;
+    g.gain.setValueAtTime(.001,t);g.gain.linearRampToValueAtTime(.5,t+.06);
+    for(let j=1;j<=8;j++)g.gain.linearRampToValueAtTime(.25+Math.random()*.2,t+.06+j*.14);
+    g.gain.exponentialRampToValueAtTime(.001,t+1.5);
+    s.connect(f);f.connect(g);g.connect(master);s.start(t);s.stop(t+1.6);
+  }
+}
+// One sound effect at most per gap between numbers, at a random moment within the gap
+function gapFx(){
+  const g=gap(),t=token;
+  if(Math.random()<.75)setTimeout(()=>{if(playing&&t===token)sfx()},300+Math.random()*Math.max(0,g-4000));
+  return sleep(g);
 }
 function bell(){
   if(!musicOn||!ac)return;
@@ -223,7 +275,7 @@ function chime(){
 
 /* ---------- game ---------- */
 let seq=[],said=-1,state='idle',token=0;
-const go=$('go'),num=$('num'),label=$('label'),log=$('log');
+const go=$('go'),num=$('num'),label=$('label'),log=$('log'),orb=$('orb');
 function chip(text,cls){const li=document.createElement('li');li.className='chip'+(cls?' '+cls:'');li.textContent=text;log.appendChild(li)}
 
 function start(){
@@ -232,7 +284,7 @@ function start(){
   go.textContent='STOP';go.className='stop';
   num.textContent='…';log.innerHTML='';
   label.className='';label.textContent='Listen…';
-  startMusic();run(token);
+  startMusic();run(token);if(micOn)listen();
   const t0=token;
   setTimeout(()=>{if(token===t0&&state==='play'&&((voiceOn&&!speechOK)||(musicOn&&ac&&ac.state!=='running'))){label.textContent='No sound? This preview may block audio. Open the page in your browser.'}},2500);
 }
@@ -245,21 +297,21 @@ async function run(t){
       chip(fmt(seq[i]));lift(i);
     });
     if(state!=='play'||t!==token)return;
-    await sleep(gap());
+    await gapFx();
     if(state!=='play'||t!==token)return;
   }
   bong();
 }
 function finish(){go.textContent='PLAY AGAIN';go.className='';st.rounds++;renderStats()}
 function bong(){
-  state='bong';stopMusic();bell();
+  state='bong';stopMusic();bell();orb.style.setProperty('--ring','var(--stop)');unlisten();
   const lost=said>=0?seq[said]:0;
   label.className='lose';label.textContent='BONG! You lost '+fmt(lost)+'.';
   chip('BONG','bg');st.bongs++;finish();
 }
 function stop(){
   if(state!=='play')return;
-  state='won';
+  state='won';orb.style.setProperty('--ring','var(--win)');unlisten();
   if('speechSynthesis' in window)speechSynthesis.cancel();
   stopMusic();
   const won=said>=0?seq[said]:0;
@@ -282,7 +334,7 @@ async function whatIf(){
   label.className='';label.textContent='What if you’d kept listening…';
   startMusic();lift(Math.max(said,0));
   for(let i=said+1;i<seq.length;i++){
-    await sleep(gap());
+    await gapFx();
     if(t!==token)return;
     await say(seq[i],()=>{
       if(t!==token)return;
@@ -292,7 +344,7 @@ async function whatIf(){
     });
     if(t!==token)return;
   }
-  await sleep(gap());
+  await gapFx();
   if(t!==token)return;
   stopMusic();bell();chip('BONG','bg');
   label.className=kept?'win':'';
@@ -306,6 +358,26 @@ go.addEventListener('click',()=>{if(swallow){swallow=false;return}state==='play'
 $('tm').onclick=e=>{musicOn=!musicOn;e.currentTarget.setAttribute('aria-pressed',musicOn);if(master)master.gain.value=musicOn?.3:0};
 $('tv').onclick=e=>{voiceOn=!voiceOn;e.currentTarget.setAttribute('aria-pressed',voiceOn)};
 $('wi').onclick=whatIf;$('rv').onclick=reveal;
+
+/* ---------- shout "stop" ---------- */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let rec=null,micOn=false,listening=false;
+function listen(){
+  if(!SR||!micOn||listening)return;
+  rec=new SR();rec.lang='en-GB';rec.continuous=true;rec.interimResults=true;
+  rec.onresult=e=>{for(let i=e.resultIndex;i<e.results.length;i++){if(/\bstop\b/i.test(e.results[i][0].transcript)){stop();return}}};
+  rec.onend=()=>{listening=false;if(micOn&&state==='play')setTimeout(listen,150)};
+  rec.onerror=ev=>{if(ev.error==='not-allowed'||ev.error==='service-not-allowed')micOff()};
+  try{rec.start();listening=true}catch(e){}
+}
+function unlisten(){if(rec){try{rec.abort()}catch(e){}}listening=false}
+function micOff(){micOn=false;unlisten();$('tl').setAttribute('aria-pressed','false')}
+if(!SR)$('tl').hidden=true;
+$('tl').onclick=e=>{
+  if(micOn){micOff();return}
+  micOn=true;e.currentTarget.setAttribute('aria-pressed','true');
+  if(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia)navigator.mediaDevices.getUserMedia({audio:true}).then(s=>s.getTracks().forEach(t=>t.stop())).catch(micOff);
+};
 renderStats();
 </script>
 </body>
