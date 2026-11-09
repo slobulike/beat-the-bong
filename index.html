@@ -31,6 +31,10 @@ h1{margin:0;font:400 26px/1 Anton,Impact,sans-serif;letter-spacing:.02em}
 .chip{padding:5px 11px;border-radius:999px;background:var(--surf);font-size:14px;font-weight:700}
 .chip.miss{background:none;border:1px dashed var(--muted);color:var(--muted)}
 .chip.bg{background:var(--stop);color:#fff}
+.after{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.after[hidden]{display:none}
+.after button{font:inherit;font-weight:700;font-size:16px;padding:12px 18px;border:0;border-radius:999px;background:var(--surf);color:var(--text);cursor:pointer}
+.after button:focus-visible{outline:3px solid var(--text);outline-offset:3px}
 #go{font:400 clamp(44px,13vw,64px)/1 Anton,Impact,sans-serif;letter-spacing:.04em;height:clamp(120px,22vh,180px);border:0;border-radius:28px;cursor:pointer;background:var(--go);color:var(--gotext);touch-action:manipulation}
 #go.stop{background:var(--stop);color:#fff}
 #go:active{transform:scale(.98)}
@@ -55,6 +59,10 @@ footer div{text-align:center}
     <p id="label">Stop before the bong and bank the last number you hear.</p>
     <div id="num">£—</div>
     <ol id="log"></ol>
+    <div class="after" id="after" hidden>
+      <button id="wi">What if?</button>
+      <button id="rv">Reveal result</button>
+    </div>
   </section>
   <button id="go">PLAY</button>
   <footer>
@@ -67,6 +75,13 @@ footer div{text-align:center}
 const $=id=>document.getElementById(id);
 const fmt=n=>'£'+n.toLocaleString('en-GB');
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// Pause after each number: never under 3s, sometimes a long agonising silence (up to 20s)
+function gap(){
+  const r=Math.random();
+  if(r<.5)return 3000+Math.random()*2000;    // 3 to 5s
+  if(r<.85)return 5000+Math.random()*5000;   // 5 to 10s
+  return 10000+Math.random()*10000;          // 10 to 20s
+}
 const PACE={gapMin:700,gapMax:1900,rate:0.95,vol:0.7}; // tweak speed here
 
 /* ---------- stats ---------- */
@@ -212,7 +227,8 @@ const go=$('go'),num=$('num'),label=$('label'),log=$('log');
 function chip(text,cls){const li=document.createElement('li');li.className='chip'+(cls?' '+cls:'');li.textContent=text;log.appendChild(li)}
 
 function start(){
-  token++;seq=makeRound();said=-1;state='play';
+  if('speechSynthesis' in window)speechSynthesis.cancel();stopMusic();
+  token++;seq=makeRound();said=-1;state='play';$('after').hidden=true;
   go.textContent='STOP';go.className='stop';
   num.textContent='…';log.innerHTML='';
   label.className='';label.textContent='Listen…';
@@ -229,7 +245,7 @@ async function run(t){
       chip(fmt(seq[i]));lift(i);
     });
     if(state!=='play'||t!==token)return;
-    await sleep(PACE.gapMin+Math.random()*(PACE.gapMax-PACE.gapMin));
+    await sleep(gap());
     if(state!=='play'||t!==token)return;
   }
   bong();
@@ -249,9 +265,38 @@ function stop(){
   const won=said>=0?seq[said]:0;
   if(won){chime();label.className='win';label.textContent='Safe! You banked '+fmt(won)+'.';st.banked+=won}
   else{label.className='';label.textContent='Too soon. Nothing banked.'}
+  $('after').hidden=false;
+  finish();
+}
+
+function reveal(){
+  if(state!=='won')return;
+  $('after').hidden=true;
   seq.slice(said+1).forEach(v=>chip(fmt(v),'miss'));
   chip('BONG','bg');
-  finish();
+}
+async function whatIf(){
+  if(state!=='won')return;
+  const t=++token,kept=said>=0?seq[said]:0;
+  state='whatif';$('after').hidden=true;
+  label.className='';label.textContent='What if you’d kept listening…';
+  startMusic();lift(Math.max(said,0));
+  for(let i=said+1;i<seq.length;i++){
+    await sleep(gap());
+    if(t!==token)return;
+    await say(seq[i],()=>{
+      if(t!==token)return;
+      num.textContent=fmt(seq[i]);
+      num.classList.remove('pop');void num.offsetWidth;num.classList.add('pop');
+      chip(fmt(seq[i]),'miss');lift(i);
+    });
+    if(t!==token)return;
+  }
+  await sleep(gap());
+  if(t!==token)return;
+  stopMusic();bell();chip('BONG','bg');
+  label.className=kept?'win':'';
+  label.textContent='BONG! '+(kept?'Good stop, you kept '+fmt(kept)+'.':'Nothing lost.');
 }
 
 /* ---------- controls ---------- */
@@ -260,6 +305,7 @@ go.addEventListener('pointerdown',()=>{if(state==='play'){stop();swallow=true;se
 go.addEventListener('click',()=>{if(swallow){swallow=false;return}state==='play'?stop():start()});
 $('tm').onclick=e=>{musicOn=!musicOn;e.currentTarget.setAttribute('aria-pressed',musicOn);if(master)master.gain.value=musicOn?.3:0};
 $('tv').onclick=e=>{voiceOn=!voiceOn;e.currentTarget.setAttribute('aria-pressed',voiceOn)};
+$('wi').onclick=whatIf;$('rv').onclick=reveal;
 renderStats();
 </script>
 </body>
